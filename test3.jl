@@ -245,70 +245,63 @@ end
 plot(freqs/1e9,abs2.(B)'; label=["L=-1" "L= 0" "L= 1"])
 
 
+M = 1; L = 1
 
-B = zeros(ComplexF64,M*(2L+1),length(freqs)); ML = M*(2L+1)
+modes = Modes(coords,M,L);
+ax = axionModes(coords,modes)
+B = zeros(ComplexF64,M*(2L+1),length(freqs))
+
+ML = M*(2L+1); B = zeros(ComplexF64,ML,length(freqs))
 # B = zeros(ComplexF64,length(freqs))
 
-tiltx = deg2rad(0.1)*0
+tiltx = deg2rad(0.1)
 
 eps = 24.; tand = 0; nm = 1e15
 
 ϵ  = eps*(1.0-1.0im*tand); nd = sqrt(ϵ); nm = complex(nm); ϵm = nm^2
 A  = 1-1/ϵ; A0 = 1-1/ϵm
 
-G0 = SMatrix{2,2,ComplexF64}((1+nm)/2,   (1-nm)/2,   (1-nm)/2,   (1+nm)/2)
-Gv = SMatrix{2,2,ComplexF64}((nd+1)/2nd, (nd-1)/2nd, (nd-1)/2nd, (nd+1)/2nd)
-Gd = SMatrix{2,2,ComplexF64}((1+nd)/2,   (1-nd)/2,   (1-nd)/2,   (1+nd)/2)
+G0 = G(ML,nm,1)
+Gv = G(ML,1,nd)
+Gd = G(ML,nd,1)
 
-S  = SMatrix{2,2,ComplexF64}( A/2, 0.0im, 0.0im,  A/2)
-S0 = SMatrix{2,2,ComplexF64}(A0/2, 0.0im, 0.0im, A0/2)
+S  =  A/2*I(2ML)*diagm([ax; ax])
+S0 = A0/2*I(2ML)*diagm([ax; ax])
 
+Pv_ = zeros(ComplexF64,2ML,2ML)
 
+# T03 = G2*P2*G1*P1*G0*P0
+# MM = T13*S0-T23*S1+T33*S2
 @time for i in eachindex(freqs)
-    # T03 = G2*P2*G1*P1*G0*P0
-    # MM = T13*S0+T23*S1+T33*S2
+    Pv  = propagationCoeffs(freqs[i],7e-3,0,-tiltx,1.0,modes,coords)
+    Pv_[1:ML,1:ML] .= Pv; Pv_[ML+1:2ML,ML+1:2ML] .= inv(Pv)
+    # Pv = cispi(+2*freqs[i]*7e-3/c0)
+    # Pv_ = diagm([fill(Pv,ML); fill(conj(Pv),ML)])
 
-    Pd = SMatrix{2,2,ComplexF64}(cispi(+2*freqs[i]*nd*1e-3/c0), 0, 0, cispi(-2*freqs[i]*nd*1e-3/c0))
-    # Pv = SMatrix{2,2,ComplexF64}(cispi(+2*freqs[i]*7e-3/c0),    0, 0, cispi(-2*freqs[i]*7e-3/c0))
-    Pv = propagationCoeffs(freqs[i],7e-3,0,-tiltx,1.0,modes,coords)
-    Pv0 = propagationCoeffs(freqs[i],0,0,+tiltx,1.0,modes,coords)
+    Pd = cispi(+2*freqs[i]*nd*1e-3/c0)
+    Pd_ = diagm([fill(conj(Pd),ML); fill(Pd,ML)])
 
-    Pv_ = inv(Pv)
-    Pv0_ = inv(Pv0)
+    T33 = Array{ComplexF64}(I(2*ML))
     
-    Pd1 = propagationCoeffs(freqs[i],0,0,-tiltx,1.0,modes,coords)
-    Pd2 = propagationCoeffs(freqs[i],0,0,+tiltx,1.0,modes,coords)
-
-    ax1 = Pd1*ax
-    ax2 = Pd2*ax
-
-    # T33 = [SMatrix{2,2,ComplexF64}(1, 0, 0, 1) for ml in 1:ML]
-    T33 = [sum([[Pv0_[ml,ml_] 0; 0 Pv0[ml,ml_]] for ml_ in 1:ML]) for ml in 1:ML]
+    T23 = T33*Gd*Pd_
     
-    T23 = [T33[ml]*Gd*Pd for ml in 1:ML]
-    
-    T13 = [T23[ml]*Gv for ml in 1:ML]
-    T13 = [sum([T13[ml_]*[Pv_[ml,ml_] 0; 0 Pv[ml,ml_]] for ml_ in 1:ML]) for ml in 1:ML]
+    T13 = T23*Gv*Pv_
 
-    T03 = [T13[ml]*G0 for ml in 1:ML]; T = T03
+    T = T13*G0
 
-    # MM = [(T13[ml]*S0-T23[ml]*S+T33[ml]*S)*ax[ml] for ml in 1:ML]
+    MM = T13*S0 - T23*S + T33*S
 
-    # MM = (T13.*S0).*ax - (T23.*S).*ax + (T33.*S).*ax
-    MM = (x->x*S0).(T13) .*ax - (x->x*S).(T23).*(ax2) + (x->x*S).(T33).*(ax2)
-    # MM = (x->x*S0).(T13) .*ax + (x->x*S).(-T23+T33).*(ax)
-    # MM = (x->x*S0).(T13) + (x->x*S).(-T23+T33)
+    M11 = MM[1:ML,1:ML]
+    M12 = MM[1:ML,ML+1:2ML]
+    M21 = MM[ML+1:2ML,1:ML]
+    M22 = MM[ML+1:2ML,ML+1:2ML]
 
+    T11 = T[1:ML,1:ML]
+    T12 = T[1:ML,ML+1:2ML]
+    T21 = T[ML+1:2ML,1:ML]
+    T22 = T[ML+1:2ML,ML+1:2ML]
 
-    for ml in 1:ML
-        B[ml,i] = (MM[ml][1,1]+MM[ml][1,2]-
-                (MM[ml][2,1]+MM[ml][2,2])*T[ml][1,2]/T[ml][2,2])
-    end
-    
-    # for ml in 1:ML
-    #     B[ml,i] = sum([(MM[ml_][1,1]+MM[ml_][1,2]-
-    #             (MM[ml_][2,1]+MM[ml_][2,2])*T[ml_][1,2]/T[ml_][2,2])*ax[ml] for ml_ in 1:ML])
-    # end
+    B[:,i] = ((M11+M12) - T12*inv(T22)*(M21+M22))*ones(ML)
 end; plot(freqs/1e9,abs2.(B)'; label=["L=-1" "L= 0" "L= 1"])
 
 
